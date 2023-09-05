@@ -69,7 +69,7 @@ def room_occupancy_on_day(_df, _building, _room, _day):
     # for i, time in enumerate(display_start_time):
     #     if _df[i][0]
 
-def pretty_print(df, _bldg, _rooms, days = ['M', 'T', 'W', 'T', 'F']):
+def pretty_print(df, _bldg, _rooms, days = ['M', 'T', 'W', 'R', 'F']):
     display_array = [[""],[""]]
     num_col = 2 # adjust if more than instructor and class are needed
     first_pass = True
