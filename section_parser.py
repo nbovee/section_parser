@@ -80,7 +80,7 @@ def pretty_print(df, _bldg, _rooms, days = ['M', 'T', 'W', 'T', 'F']):
         for room in rooms:
             display_array[1].append(bldg + room)
             for i in range(num_col -1):
-                display_array[1].append(bldg + room)
+                display_array[1].append("")
             key, array = room_occupancy_on_day(df,  bldg, room, day)
             if first_pass:
                 first_pass = False
@@ -99,10 +99,10 @@ if __name__ == '__main__':
     section_tally_output = 'section_tally_f23_parsed.xlsx'
     bldg = 'ENGR' # currently supports ENGR and ROWAN, case dependant
     rooms = ['140', '141', '240', '241'] # must be a list, even if single entry
-    with open('map_dict.json', 'r') as f:
-        map_dict = json.load(f)
+    with open('course_title_dict.json', 'r') as f:
+        course_title_dict = json.load(f)
     df = parse_section_tally(section_tally_target)
-    df = map_course_names(df, map_dict) # exact names only for now
+    df = map_course_names(df, course_title_dict) # exact names only for now
     save_intermediate = False
     if save_intermediate:
         save_to_excel(df, section_tally_output)
