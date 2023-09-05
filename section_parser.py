@@ -60,14 +60,22 @@ def map_instructor_names(df, dict_path):
         map_dict = json.load(f)
     prof_df = df.filter(['CRN','Prof'], axis=1)
     prof_series = prof_df['Prof'].str.split(';', expand = True)
+    prof_series = prof_series.replace([
+        re.compile(r'\n'),
+        re.compile(r' &'),
+        re.compile(r'^ ')
+         ], '', regex = True)
     # map to only ENGR faculty last names
     # prof_series = prof_series.str.apply(str.replace, args=('\n','', regex = True))
     for i in range(len(prof_series.columns)):
-        prof_series[i] = prof_series[i].map(map_dict).fillna("")
+        prof_series[i] = prof_series[i].map(map_dict)
     # concat
-    prof_series['Prof'] = prof_series[0] + ', ' + prof_series[1] + ', ' + prof_series[2]
+    # if we find out how to use the string join properly, this can be vastly simplified
+    prof_series['Prof'] = prof_series[0].fillna("") + ', ' + prof_series[1].fillna("") + ', ' + prof_series[2].fillna("")
     prof_series = prof_series.drop(columns = [0, 1, 2])
     prof_series = prof_series.replace([
+        re.compile(r'^, , '),
+        re.compile(r'^, '),
         re.compile(r', , $'),
         re.compile(r', $')
         ],
@@ -130,7 +138,7 @@ if __name__ == '__main__':
     if save_intermediate:
         save_to_excel(df, section_tally_output)
     pretty_array = pretty_print(df, bldg, rooms)
-    with open('test.csv', 'w', newline='') as f:
+    with open('lab_occupancy_parsed.csv', 'w', newline='') as f:
         w = csv.writer(f)
         w.writerows(pretty_array)
     
