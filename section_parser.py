@@ -4,6 +4,7 @@ import pandas
 import numpy # used but not directly referenced
 import csv
 import json
+import re
 import xlrd # flagged here just so pipreqs sees it
 
 # target must be resaved as a real .xls file, not the half xml Section Tally produces
@@ -48,9 +49,32 @@ def save_to_excel(dataframe, filename):
     with pandas.ExcelWriter(filename) as writer:
         dataframe.to_excel(writer, sheet_name='parsed', index=False)
 
-def map_course_names(df, map_dict):
+def map_course_names(df, dict_path):
+    with open(dict_path, 'r') as f:
+        map_dict = json.load(f)
     df['Title'] = df['Title'].replace(map_dict)
     return df
+
+def map_instructor_names(df, dict_path):
+    with open(dict_path, 'r') as f:
+        map_dict = json.load(f)
+    prof_df = df.filter(['CRN','Prof'], axis=1)
+    prof_series = prof_df['Prof'].str.split(';', expand = True)
+    # map to only ENGR faculty last names
+    # prof_series = prof_series.str.apply(str.replace, args=('\n','', regex = True))
+    for i in range(len(prof_series.columns)):
+        prof_series[i] = prof_series[i].map(map_dict).fillna("")
+    # concat
+    prof_series['Prof'] = prof_series[0] + ', ' + prof_series[1] + ', ' + prof_series[2]
+    prof_series = prof_series.drop(columns = [0, 1, 2])
+    prof_series = prof_series.replace([
+        re.compile(r', , $'),
+        re.compile(r', $')
+        ],
+        '', regex = True)
+    prof_df = prof_series.merge(df.drop(columns = 'Prof'), left_index=True, right_index=True)
+    # join dataframe back
+    return prof_df
 
 def room_occupancy(df, prof =  '.', building = '.', room = '.', day = '.'):
     _df = df[df['Prof'].str.contains(prof) \
@@ -66,8 +90,6 @@ def room_occupancy_on_day(_df, _building, _room, _day):
     # print(_df)
     __df = __df.to_numpy()
     return [_day, _building + _room], __df
-    # for i, time in enumerate(display_start_time):
-    #     if _df[i][0]
 
 def pretty_print(df, _bldg, _rooms, days = ['M', 'T', 'W', 'R', 'F']):
     display_array = [[""],[""]]
@@ -97,12 +119,13 @@ if __name__ == '__main__':
     """
     section_tally_target = 'section_tally_f23_resave.xls' 
     section_tally_output = 'section_tally_f23_parsed.xlsx'
+    course_dict_json = 'course_title_dict.json'
+    faculty_dict_json = 'engr_instructor_dict.json'
     bldg = 'ENGR' # currently supports ENGR and ROWAN, case dependant
     rooms = ['140', '141', '240', '241'] # must be a list, even if single entry
-    with open('course_title_dict.json', 'r') as f:
-        course_title_dict = json.load(f)
     df = parse_section_tally(section_tally_target)
-    df = map_course_names(df, course_title_dict) # exact names only for now
+    df = map_course_names(df, course_dict_json) # exact names only for now
+    df = map_instructor_names(df, faculty_dict_json)
     save_intermediate = False
     if save_intermediate:
         save_to_excel(df, section_tally_output)
