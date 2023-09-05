@@ -55,32 +55,43 @@ def map_course_names(df, dict_path):
     df['Title'] = df['Title'].replace(map_dict)
     return df
 
-def map_instructor_names(df, dict_path):
-    with open(dict_path, 'r') as f:
-        map_dict = json.load(f)
+def keep_only_instructors(df, list_path):
+    with open(list_path, 'r') as f:
+        inst_list = json.load(f)
+    series_lists = df['Prof'].str.split(',')
+    new_list = []
+    for _list in series_lists:
+        new_list.append("".join(filter(lambda i: i in inst_list, list(map(str.strip,_list)))))
+    df['Prof'] = new_list
+    return df
+
+def instructor_last_names(df):
     prof_df = df.filter(['CRN','Prof'], axis=1)
-    prof_series = prof_df['Prof'].str.split(';', expand = True)
-    prof_series = prof_series.replace([
+    prod_df = prof_df['Prof'].str.split(';', expand = True)
+    prod_df = prod_df.replace([
         re.compile(r'\n'),
         re.compile(r' &'),
         re.compile(r'^ ')
-         ], '', regex = True)
+         ], '', regex = True).fillna('')
+    for colname, coldata in prod_df.items():
+        temp = coldata.str.split(',', expand = True).drop(columns=[1])
+        prod_df[colname] = temp.fillna("")
+    
     # map to only ENGR faculty last names
-    # prof_series = prof_series.str.apply(str.replace, args=('\n','', regex = True))
-    for i in range(len(prof_series.columns)):
-        prof_series[i] = prof_series[i].map(map_dict)
+
     # concat
     # if we find out how to use the string join properly, this can be vastly simplified
-    prof_series['Prof'] = prof_series[0].fillna("") + ', ' + prof_series[1].fillna("") + ', ' + prof_series[2].fillna("")
-    prof_series = prof_series.drop(columns = [0, 1, 2])
-    prof_series = prof_series.replace([
+    prod_df['Prof'] = prod_df[0] + ', ' + prod_df[1] + ', ' + prod_df[2]
+    prod_df = prod_df.drop(columns = [0, 1, 2])
+    prod_df = prod_df.replace([
         re.compile(r'^, , '),
         re.compile(r'^, '),
         re.compile(r', , $'),
         re.compile(r', $')
         ],
         '', regex = True)
-    prof_df = prof_series.merge(df.drop(columns = 'Prof'), left_index=True, right_index=True)
+    prod_df['Prof'] = prod_df['Prof'].replace("", "ERROR")
+    prof_df = prod_df.merge(df.drop(columns = 'Prof'), left_index=True, right_index=True)
     # join dataframe back
     return prof_df
 
@@ -128,17 +139,19 @@ if __name__ == '__main__':
     section_tally_target = 'section_tally_f23_resave.xls' 
     section_tally_output = 'section_tally_f23_parsed.xlsx'
     course_dict_json = 'course_title_dict.json'
-    faculty_dict_json = 'engr_instructor_dict.json'
+    faculty_list = 'exeed_instructors.json'
     bldg = 'ENGR' # currently supports ENGR and ROWAN, case dependant
     rooms = ['140', '141', '240', '241'] # must be a list, even if single entry
     df = parse_section_tally(section_tally_target)
     df = map_course_names(df, course_dict_json) # exact names only for now
-    df = map_instructor_names(df, faculty_dict_json)
+    df = instructor_last_names(df)
+    if faculty_list is not None:
+        df = keep_only_instructors(df, faculty_list)
     save_intermediate = False
     if save_intermediate:
         save_to_excel(df, section_tally_output)
     pretty_array = pretty_print(df, bldg, rooms)
-    with open('lab_occupancy_parsed.csv', 'w', newline='') as f:
+    with open('test_lab_occupancy_parsed.csv', 'w', newline='') as f:
         w = csv.writer(f)
         w.writerows(pretty_array)
     
