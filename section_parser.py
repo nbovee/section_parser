@@ -105,9 +105,10 @@ def room_occupancy(df, prof =  '.', building = '.', room = '.', day = '.'):
 def room_occupancy_on_day(_df, _building, _room, _day):
     __df = room_occupancy(_df, building=_building, room=_room, day=_day)
     __df = __df.loc[:,['Beg','Title','Prof']]
-    __df = __df.set_index('Beg').reindex(index=display_start_time).reset_index().fillna(value="")
+    __df = __df.join(pandas.DataFrame(index=display_start_time),on='Beg', how='right').sort_values(by='Beg').reindex()
+    # __df = __df.set_index('Beg').reindex(index=display_start_time, fill_value="").reset_index()
     # print(_df)
-    __df = __df.to_numpy()
+    __df = __df.fillna("").to_numpy()
     return [_day, _building + _room], __df
 
 def pretty_print(df, _bldg, _rooms, days = ['M', 'T', 'W', 'R', 'F']):
@@ -128,6 +129,8 @@ def pretty_print(df, _bldg, _rooms, days = ['M', 'T', 'W', 'R', 'F']):
                 display_array.extend(array.tolist())
             else:
                 for i, row in enumerate(array[:,1:].tolist()):
+                    while len(display_array)<i+2:
+                        display_array.extend([])
                     display_array[i+2].extend(row)
     return display_array
 
@@ -139,9 +142,10 @@ if __name__ == '__main__':
     section_tally_target = 'section_tally_f23_resave.xls' 
     section_tally_output = 'section_tally_f23_parsed.xlsx'
     course_dict_json = 'course_title_dict.json'
-    faculty_list = 'exeed_instructors.json'
+    faculty_list = None# 'exeed_instructors.json'
     bldg = 'ENGR' # currently supports ENGR and ROWAN, case dependant
-    rooms = ['140', '141', '240', '241'] # must be a list, even if single entry
+    # rooms = ['140', '141', '240', '241'] # must be a list, even if single entry
+    rooms = ['338', '339', '340', '341']
     df = parse_section_tally(section_tally_target)
     df = map_course_names(df, course_dict_json) # exact names only for now
     df = instructor_last_names(df)
@@ -151,7 +155,7 @@ if __name__ == '__main__':
     if save_intermediate:
         save_to_excel(df, section_tally_output)
     pretty_array = pretty_print(df, bldg, rooms)
-    with open('test_lab_occupancy_parsed.csv', 'w', newline='') as f:
+    with open('ece_lab_occupancy_parsed.csv', 'w', newline='') as f:
         w = csv.writer(f)
         w.writerows(pretty_array)
     
