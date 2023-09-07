@@ -42,7 +42,7 @@ def parse_section_tally(target):
     # filter to only Rowan Hall or Eng. Hall. This has the side effect of dropping Online courses or courses with unmarked rooms
     df = df[df['Bldg'].isin(['ROWAN', 'ENGR'])]
     # handle multiple profs, '\n' to '; \n'
-    df['Prof'] = df['Prof'].str.rstrip().replace('\n','; \n', regex=True)
+    df['Prof'] = df['Prof'].str.rstrip().replace('\n',';', regex=True)
     return df
 
 def save_to_excel(dataframe, filename):
@@ -55,7 +55,7 @@ def map_course_names(df, dict_path):
     df['Title'] = df['Title'].replace(map_dict)
     return df
 
-def keep_only_instructors(df, list_path):
+def drop_names_not_in(df, list_path):
     with open(list_path, 'r') as f:
         inst_list = json.load(f)
     series_lists = df['Prof'].str.split(',')
@@ -65,7 +65,7 @@ def keep_only_instructors(df, list_path):
     df['Prof'] = new_list
     return df
 
-def instructor_last_names(df):
+def keep_instructor_last_names(df):
     prof_df = df.filter(['CRN','Prof'], axis=1)
     prod_df = prof_df['Prof'].str.split(';', expand = True)
     prod_df = prod_df.replace([
@@ -95,23 +95,21 @@ def instructor_last_names(df):
     # join dataframe back
     return prof_df
 
-def room_occupancy(df, prof =  '.', building = '.', room = '.', day = '.'):
+def room_occupancy(df, prof =  '.', room = ('.','.'), day = '.'):
     _df = df[df['Prof'].str.contains(prof) \
             & df['Day'].str.contains(day) \
-            & df['Bldg'].str.contains(building) \
-            & df['Room'].str.contains(room)]
+            & df['Bldg'].str.contains(room[0]) \
+            & df['Room'].str.contains(room[1])]
     return _df.sort_values(by=['Room', 'Beg'])
 
-def room_occupancy_on_day(_df, _building, _room, _day):
-    __df = room_occupancy(_df, building=_building, room=_room, day=_day)
+def room_occupancy_on_day(_df, _room, _day):
+    __df = room_occupancy(_df, room=_room, day=_day)
     __df = __df.loc[:,['Beg','Title','Prof']]
     __df = __df.join(pandas.DataFrame(index=display_start_time),on='Beg', how='right').sort_values(by='Beg').reindex()
-    # __df = __df.set_index('Beg').reindex(index=display_start_time, fill_value="").reset_index()
-    # print(_df)
     __df = __df.fillna("").to_numpy()
-    return [_day, _building + _room], __df
+    return [_day, _room], __df
 
-def pretty_print(df, _bldg, _rooms, days = ['M', 'T', 'W', 'R', 'F']):
+def pretty_print(df, _rooms, _days):
     display_array = [[""],[""]]
     num_col = 2 # adjust if more than instructor and class are needed
     first_pass = True
@@ -120,10 +118,10 @@ def pretty_print(df, _bldg, _rooms, days = ['M', 'T', 'W', 'R', 'F']):
         for i in range(num_col*len(rooms) -1):
             display_array[0].append("")
         for room in rooms:
-            display_array[1].append(bldg + room)
+            display_array[1].append("".join(room))
             for i in range(num_col -1):
                 display_array[1].append("")
-            key, array = room_occupancy_on_day(df,  bldg, room, day)
+            key, array = room_occupancy_on_day(df, room, day)
             if first_pass:
                 first_pass = False
                 display_array.extend(array.tolist())
@@ -139,22 +137,28 @@ if __name__ == '__main__':
     whatever is downloaded from Section Tally MUST be resaved as a true .xls
     Section Tally outputs a broken xml file as far as I can tell
     """
+
+    # parse section tally
+    # merge overlapping course entries ?
+    # reorganize into full printable structure
+    # apply filters
+    # drop unwanted entries
+
     section_tally_target = 'section_tally_f23_resave.xls' 
     section_tally_output = 'section_tally_f23_parsed.xlsx'
     course_dict_json = 'course_title_dict.json'
-    faculty_list = None# 'exeed_instructors.json'
-    bldg = 'ENGR' # currently supports ENGR and ROWAN, case dependant
-    # rooms = ['140', '141', '240', '241'] # must be a list, even if single entry
-    rooms = ['338', '339', '340', '341']
+    days = ['M', 'T', 'W', 'R', 'F']
+    faculty_list = None # 'exeed_instructors.json'
+    rooms = [('ENGR', '338'), ('ENGR', '339'), ('ENGR', '340'), ('ENGR', '341')]
     df = parse_section_tally(section_tally_target)
     df = map_course_names(df, course_dict_json) # exact names only for now
-    df = instructor_last_names(df)
+    df = keep_instructor_last_names(df)
     if faculty_list is not None:
-        df = keep_only_instructors(df, faculty_list)
+        df = drop_names_not_in(df, faculty_list)
     save_intermediate = False
     if save_intermediate:
         save_to_excel(df, section_tally_output)
-    pretty_array = pretty_print(df, bldg, rooms)
+    pretty_array = pretty_print(df, rooms, days)
     with open('ece_lab_occupancy_parsed.csv', 'w', newline='') as f:
         w = csv.writer(f)
         w.writerows(pretty_array)
