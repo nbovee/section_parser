@@ -1,8 +1,7 @@
 #!/usr/bin/python
 
 import pandas
-import numpy # used but not directly referenced
-import csv
+import numpy
 import json
 import re
 import xlrd # flagged here just so pipreqs sees it
@@ -42,7 +41,7 @@ def parse_section_tally(target):
     # filter to only Rowan Hall or Eng. Hall. This has the side effect of dropping Online courses or courses with unmarked rooms
     df = df[df['Bldg'].isin(['ROWAN', 'ENGR'])]
     # handle multiple profs, '\n' to '; \n'
-    df['Prof'] = df['Prof'].str.rstrip().replace('\n',';', regex=True)
+    df['Prof'] = df['Prof'].str.rstrip()#.replace('\n',';', regex=True)
     return df
 
 def save_to_excel(dataframe, filename):
@@ -50,6 +49,7 @@ def save_to_excel(dataframe, filename):
         dataframe.to_excel(writer, sheet_name='parsed', index=False, header = False)
 
 def map_course_names(df, _dict):
+    df['Title'] = df['Title'].str.strip() # catches some bad formatting from ST
     df['Title'] = df['Title'].replace(_dict)
     return df
 
@@ -63,19 +63,12 @@ def drop_names_not_in(_df, instr_list):
 
 def instructor_last_names(_df):
     new_df = _df.filter(['CRN','Prof'], axis=1)
-    new_df = new_df['Prof'].str.split(';', expand = True)
-    new_df = new_df.replace([
-        re.compile(r'\n'),
-        re.compile(r' &'),
-        re.compile(r'^ ')
-         ], '', regex = True).fillna('')
+    new_df = new_df['Prof'].str.strip()
+    new_df = new_df.str.split('\n', expand = True).fillna('')
     for colname, coldata in new_df.items():
         temp = coldata.str.split(',', expand = True).drop(columns=[1])
         new_df[colname] = temp.fillna("")
     
-    # map to only ENGR faculty last names
-
-    # concat
     # if we find out how to use the string join properly, this can be vastly simplified
     new_df['Prof'] = new_df[0] + ', ' + new_df[1] + ', ' + new_df[2]
     new_df = new_df.drop(columns = [0, 1, 2])
@@ -105,25 +98,36 @@ def room_occupancy_on_day(_df, _room, _day):
     new_df = new_df.fillna("").to_numpy()
     return [_day, _room], new_df
 
-def pretty_print(df, _rooms, _days):
-    num_col = 2 # adjust if more than instructor and class are needed
-    header_array = numpy.full((2, len(_days)*len(_rooms)*(num_col + 1)), "", dtype=numpy.dtype('<U100'))
-    display_array = None
+def pretty_print(df, _rooms, _days, _num_col, overlaps):
+
+    def _pad_end(_array, final_axis):
+        return numpy.pad(_array, ((0, final_axis - _array.shape[0]), (0,0)), constant_values='')
     
+    num_col = _num_col + overlaps
+    header_array = numpy.full((2, len(_days)*len(_rooms)*(num_col)), "", dtype=numpy.dtype('<U100'))
+    display_array = None
+
     for i, day in enumerate(days):
-        header_array[0,i*len(_rooms)*(num_col + 1)] = day
+        header_array[0,i*len(_rooms)*(num_col)] = day
         for j, room in enumerate(_rooms):
-            header_array[1,i*len(_rooms)*(num_col + 1)+j*(num_col + 1)] = ''.join(room)
+            header_array[1,i*len(_rooms)*(num_col)+j*(num_col)] = ''.join(room)
             key, _array = room_occupancy_on_day(df, room, day)
+            if not overlaps:
+                start_times = _array[:,:1]
+                _array = _array[:,1:]
             if display_array is None:
                 display_array = _array
             else:
                 # pad the smaller array so hstack can work
                 pad_to = max(display_array.shape[0], _array.shape[0])
-                display_array = numpy.pad(display_array, ((0, pad_to - display_array.shape[0]), (0,0)), constant_values='')
-                _array = numpy.pad(_array, ((0, pad_to - _array.shape[0]), (0,0)), constant_values='')
+                display_array = _pad_end(display_array, pad_to)
+                _array = _pad_end(_array, pad_to)
                 display_array = numpy.hstack((display_array, _array))
 
+    if not overlaps: # this will fail if there are overlaps
+        # start_times = numpy.pad(start_times, (1, 0), constant_values='')
+        display_array = numpy.hstack((start_times, display_array))
+        header_array = numpy.pad(header_array, ((0, 0), (1, 0)), constant_values='')
     return numpy.vstack((header_array, display_array))
 
 if __name__ == '__main__':
@@ -131,33 +135,38 @@ if __name__ == '__main__':
     whatever is downloaded from Section Tally MUST be resaved as a true .xls
     Section Tally outputs a broken xml file as far as I can tell
     """
-
+    # time fields are heavily duplicated since some courses over scheduled at the same time same room
+    # only practical way to clean that up without a lot of programming is manual toggle
     # parse section tally
     # merge overlapping course entries ?
     # reorganize into full printable structure
     # apply filters
     # drop unwanted entries
-    config_path = 'engr_rooms_config.json'
+    config_path = 'exeed_config.json'
     with open(config_path, 'r') as f:
         config_dict = json.load(f)
 
     room_list = config_dict['rooms']
     course_dict = config_dict['courses']
     faculty_list = config_dict['faculty']
-
+    course_overlaps = False
     section_tally_target = 'section_tally_f23_resave.xls' 
     intermediate_output = 'section_tally_f23_parsed.xlsx'
-    final_pretty_output = 'test_pretty_output.xlsx'
+    final_pretty_output = config_path.split('_')[0] + '_room_schedule_output.xlsx'
     days = ['M', 'T', 'W', 'R', 'F']
+    num_col = 2 # adjust if more than instructor and class are needed
+
+    save_intermediate_df = False
+    drop_unknown_names = False
 
     df = parse_section_tally(section_tally_target)
     df = map_course_names(df, course_dict) # exact names only for now
     df = instructor_last_names(df)
-    save_intermediate = True
-    if save_intermediate:
+    
+    if save_intermediate_df:
         save_to_excel(df, intermediate_output)
-    drop_names = False
-    if drop_names:
+    if drop_unknown_names:
         df = drop_names_not_in(df, faculty_list)
-    pretty_array = pretty_print(df, room_list, days)
+    pretty_array = pretty_print(df, room_list, days, num_col, course_overlaps)
+    # could leverage python xlsx writers to pretty up the code in script instead of this
     save_to_excel(pandas.DataFrame(pretty_array), final_pretty_output)
