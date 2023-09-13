@@ -47,90 +47,84 @@ def parse_section_tally(target):
 
 def save_to_excel(dataframe, filename):
     with pandas.ExcelWriter(filename) as writer:
-        dataframe.to_excel(writer, sheet_name='parsed', index=False)
+        dataframe.to_excel(writer, sheet_name='parsed', index=False, header = False)
 
-def map_course_names(df, dict_path):
-    with open(dict_path, 'r') as f:
-        map_dict = json.load(f)
-    df['Title'] = df['Title'].replace(map_dict)
+def map_course_names(df, _dict):
+    df['Title'] = df['Title'].replace(_dict)
     return df
 
-def drop_names_not_in(df, list_path):
-    with open(list_path, 'r') as f:
-        inst_list = json.load(f)
-    series_lists = df['Prof'].str.split(',')
+def drop_names_not_in(_df, instr_list):
+    series_lists = _df['Prof'].str.split(',')
     new_list = []
     for _list in series_lists:
-        new_list.append("".join(filter(lambda i: i in inst_list, list(map(str.strip,_list)))))
-    df['Prof'] = new_list
-    return df
+        new_list.append("".join(filter(lambda i: i in instr_list, list(map(str.strip,_list)))))
+    _df['Prof'] = new_list
+    return _df
 
-def keep_instructor_last_names(df):
-    prof_df = df.filter(['CRN','Prof'], axis=1)
-    prod_df = prof_df['Prof'].str.split(';', expand = True)
-    prod_df = prod_df.replace([
+def instructor_last_names(_df):
+    new_df = _df.filter(['CRN','Prof'], axis=1)
+    new_df = new_df['Prof'].str.split(';', expand = True)
+    new_df = new_df.replace([
         re.compile(r'\n'),
         re.compile(r' &'),
         re.compile(r'^ ')
          ], '', regex = True).fillna('')
-    for colname, coldata in prod_df.items():
+    for colname, coldata in new_df.items():
         temp = coldata.str.split(',', expand = True).drop(columns=[1])
-        prod_df[colname] = temp.fillna("")
+        new_df[colname] = temp.fillna("")
     
     # map to only ENGR faculty last names
 
     # concat
     # if we find out how to use the string join properly, this can be vastly simplified
-    prod_df['Prof'] = prod_df[0] + ', ' + prod_df[1] + ', ' + prod_df[2]
-    prod_df = prod_df.drop(columns = [0, 1, 2])
-    prod_df = prod_df.replace([
+    new_df['Prof'] = new_df[0] + ', ' + new_df[1] + ', ' + new_df[2]
+    new_df = new_df.drop(columns = [0, 1, 2])
+    new_df = new_df.replace([
         re.compile(r'^, , '),
         re.compile(r'^, '),
         re.compile(r', , $'),
         re.compile(r', $')
         ],
         '', regex = True)
-    prod_df['Prof'] = prod_df['Prof'].replace("", "ERROR")
-    prof_df = prod_df.merge(df.drop(columns = 'Prof'), left_index=True, right_index=True)
+    new_df['Prof'] = new_df['Prof'].replace("", "ERROR")
+    prof_df = new_df.merge(df.drop(columns = 'Prof'), left_index=True, right_index=True)
     # join dataframe back
     return prof_df
 
 def room_occupancy(df, prof =  '.', room = ('.','.'), day = '.'):
-    _df = df[df['Prof'].str.contains(prof) \
+    new_df = df[df['Prof'].str.contains(prof) \
             & df['Day'].str.contains(day) \
             & df['Bldg'].str.contains(room[0]) \
             & df['Room'].str.contains(room[1])]
-    return _df.sort_values(by=['Room', 'Beg'])
+    return new_df.sort_values(by=['Room', 'Beg'])
 
 def room_occupancy_on_day(_df, _room, _day):
-    __df = room_occupancy(_df, room=_room, day=_day)
-    __df = __df.loc[:,['Beg','Title','Prof']]
-    __df = __df.join(pandas.DataFrame(index=display_start_time),on='Beg', how='right').sort_values(by='Beg').reindex()
-    __df = __df.fillna("").to_numpy()
-    return [_day, _room], __df
+    new_df = room_occupancy(_df, room=_room, day=_day)
+    new_df = new_df.loc[:,['Beg','Title','Prof']]
+    new_df = new_df.join(pandas.DataFrame(index=display_start_time),on='Beg', how='right').sort_values(by='Beg').reindex()
+    new_df = new_df.fillna("").to_numpy()
+    return [_day, _room], new_df
 
 def pretty_print(df, _rooms, _days):
-    display_array = [[""],[""]]
     num_col = 2 # adjust if more than instructor and class are needed
-    first_pass = True
-    for day in days:
-        display_array[0].append(day)
-        for i in range(num_col*len(rooms) -1):
-            display_array[0].append("")
-        for room in rooms:
-            display_array[1].append("".join(room))
-            for i in range(num_col -1):
-                display_array[1].append("")
-            key, array = room_occupancy_on_day(df, room, day)
-            if first_pass:
-                first_pass = False
-                display_array.extend(array.tolist())
+    header_array = numpy.full((2, len(_days)*len(_rooms)*(num_col + 1)), "", dtype=numpy.dtype('<U100'))
+    display_array = None
+    
+    for i, day in enumerate(days):
+        header_array[0,i*len(_rooms)*(num_col + 1)] = day
+        for j, room in enumerate(_rooms):
+            header_array[1,i*len(_rooms)*(num_col + 1)+j*(num_col + 1)] = ''.join(room)
+            key, _array = room_occupancy_on_day(df, room, day)
+            if display_array is None:
+                display_array = _array
             else:
-                for i, row in enumerate(array[:,1:].tolist()):
-                    while len(display_array)<i+2:
-                        display_array.extend([])
-                    display_array[i+2].extend(row)
-    return display_array
+                # pad the smaller array so hstack can work
+                pad_to = max(display_array.shape[0], _array.shape[0])
+                display_array = numpy.pad(display_array, ((0, pad_to - display_array.shape[0]), (0,0)), constant_values='')
+                _array = numpy.pad(_array, ((0, pad_to - _array.shape[0]), (0,0)), constant_values='')
+                display_array = numpy.hstack((display_array, _array))
+
+    return numpy.vstack((header_array, display_array))
 
 if __name__ == '__main__':
     """ IMPORTANT
@@ -143,23 +137,27 @@ if __name__ == '__main__':
     # reorganize into full printable structure
     # apply filters
     # drop unwanted entries
+    config_path = 'engr_rooms_config.json'
+    with open(config_path, 'r') as f:
+        config_dict = json.load(f)
+
+    room_list = config_dict['rooms']
+    course_dict = config_dict['courses']
+    faculty_list = config_dict['faculty']
 
     section_tally_target = 'section_tally_f23_resave.xls' 
-    section_tally_output = 'section_tally_f23_parsed.xlsx'
-    course_dict_json = 'course_title_dict.json'
+    intermediate_output = 'section_tally_f23_parsed.xlsx'
+    final_pretty_output = 'test_pretty_output.xlsx'
     days = ['M', 'T', 'W', 'R', 'F']
-    faculty_list = None # 'exeed_instructors.json'
-    rooms = [('ENGR', '338'), ('ENGR', '339'), ('ENGR', '340'), ('ENGR', '341')]
+
     df = parse_section_tally(section_tally_target)
-    df = map_course_names(df, course_dict_json) # exact names only for now
-    df = keep_instructor_last_names(df)
-    if faculty_list is not None:
-        df = drop_names_not_in(df, faculty_list)
-    save_intermediate = False
+    df = map_course_names(df, course_dict) # exact names only for now
+    df = instructor_last_names(df)
+    save_intermediate = True
     if save_intermediate:
-        save_to_excel(df, section_tally_output)
-    pretty_array = pretty_print(df, rooms, days)
-    with open('ece_lab_occupancy_parsed.csv', 'w', newline='') as f:
-        w = csv.writer(f)
-        w.writerows(pretty_array)
-    
+        save_to_excel(df, intermediate_output)
+    drop_names = False
+    if drop_names:
+        df = drop_names_not_in(df, faculty_list)
+    pretty_array = pretty_print(df, room_list, days)
+    save_to_excel(pandas.DataFrame(pretty_array), final_pretty_output)
