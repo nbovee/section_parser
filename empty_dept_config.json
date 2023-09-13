@@ -8,6 +8,7 @@
         "exact name from section tally": "abbreviated name"
     },
     "faculty" : [
-        "STAFF" // keep as default, add others in a list
+        "STAFF",
+        "Lastname"
     ]
 }
