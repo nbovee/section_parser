@@ -70,8 +70,8 @@ def instructor_last_names(_df):
         new_df[colname] = temp.fillna("")
     
     # if we find out how to use the string join properly, this can be vastly simplified
-    new_df['Prof'] = new_df[0] + ', ' + new_df[1] + ', ' + new_df[2]
-    new_df = new_df.drop(columns = [0, 1, 2])
+    new_df['Prof'] = new_df[0] + ', ' + new_df[1] #+ ', ' + new_df[2]
+    new_df = new_df.drop(columns = [0, 1])#, 2])
     new_df = new_df.replace([
         re.compile(r'^, , '),
         re.compile(r'^, '),
@@ -137,11 +137,6 @@ if __name__ == '__main__':
     """
     # time fields are heavily duplicated since some courses over scheduled at the same time same room
     # only practical way to clean that up without a lot of programming is manual toggle
-    # parse section tally
-    # merge overlapping course entries ?
-    # reorganize into full printable structure
-    # apply filters
-    # drop unwanted entries
     config_path = 'exeed_config.json'
     with open(config_path, 'r') as f:
         config_dict = json.load(f)
@@ -150,8 +145,8 @@ if __name__ == '__main__':
     course_dict = config_dict['courses']
     faculty_list = config_dict['faculty']
     course_overlaps = False
-    section_tally_target = 'section_tally_f23_resave.xls' 
-    intermediate_output = 'section_tally_f23_parsed.xlsx'
+    section_tally_target = 'section_tally_f24_resave.xls' 
+    intermediate_output = 'section_tally_f24_parsed.xlsx'
     final_pretty_output = config_path.split('_')[0] + '_room_schedule_output.xlsx'
     days = ['M', 'T', 'W', 'R', 'F']
     num_col = 2 # adjust if more than instructor and class are needed
