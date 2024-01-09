@@ -14,14 +14,39 @@ display_end_time = ['0915', '1045', '1215', '1345', '1515', '1645', '1815', '194
 def parse_section_tally(target):
     try:
         df = pandas.read_excel(target, usecols='A,C:D,G:I', engine='xlrd')
-        # df = pandas.read_xml(target)
+        # df = pandas.read_xml(target) # doesn't play nice
     except Exception as e:
         print("Tip: Section Tally files must be resaved as true .xls first.")
         print(e)
         exit(1)
-        
+    
+    room_col_re = r'^(?P<days>\S+)\s+(?P<start>\S+)\s+(?P<end>\S+)\s+(?P<building>\S*)\s+(?P<room>\S*)\s+(?P<type>\S+)' 
     room_col = df.columns[-1] # former col I
-    # dupe data (find \n in col I and make new entry)
+
+    # filter out rows with empty room_col
+    # split timeblock data
+    df1 = df[room_col].str.split('\n', expand=True)
+    df1 = df1.stack()
+    df1 = df1.str.extractall(room_col_re)
+    df1 = df1.reset_index().rename(columns={"level_0": "index"})
+    df1_mult = df1.loc[df1['days'].str.len() > 1]
+    df1_single = df1.loc[df1['days'].str.len() <= 1]
+    df_d = df1_mult["days"].str.extractall(r'(\S)').reset_index()
+    # .reset_index(names=["orig", "l1", "l2", "l3"]).drop(axis = 1, columns = ["l1", "l2", "l3"])
+    df1_mult = df1_mult.merge(df_d, left_index=True, right_on='level_0', how = 'inner')\
+        .drop(axis = 1, columns = ["days", "level_0","level_1", "match_x", "match_y"]).rename(columns={0: "day"})
+    df1_single = df1_single.rename(columns={"days": "day"}).drop(axis=1, columns=["level_1", "match"])
+    df1 = pandas.concat([df1_mult, df1_single])
+    df = df.drop(axis = 1, columns = "Day  Beg   End   Bldg Room  (Type)")
+    df = df.merge(df1, left_index=True, right_on="index", how = 'inner')
+    df1 = df1.rename(columns={0: room_col})
+    df1 = df1.drop(axis=1, labels='level_1')
+    # regex roomcol with below
+
+    # split days data
+
+    # reset index
+    # split timeblock data (find \n in col I and make new entry)
     df1 = df[room_col].str.split('\n', expand=True)\
         .stack()\
         .reset_index(level=1)\
@@ -31,7 +56,7 @@ def parse_section_tally(target):
     df = df.drop(axis=1, labels=room_col)\
         .merge(df1, left_index=True, right_index=True)\
         .reset_index(drop=True)
-    # split room_col to individual col (split is strange on classes without rooms due to .split())
+    # split room_col to individual col (split is strange on classes without rooms such as Online due to .split() functionality)
     df2 = df[room_col].str.split(expand=True)\
         .set_axis(room_col.split(), axis=1)
     # merge back in
@@ -62,8 +87,13 @@ def drop_names_not_in(_df, instr_list):
     return _df
 
 def instructor_last_names(_df):
-    new_df = _df.filter(['CRN','Prof'], axis=1)
-    new_df = new_df['Prof'].str.strip()
+    # new_df = _df.filter(['CRN','Prof'], axis=1)
+    # new_df = new_df['Prof'].str.strip()
+    # print(_df.to_markdown())
+    lname_re = "^\s*([^\s,]+)"
+    _tempppp = _df['Prof'].str.extractall(lname_re, re.MULTILINE)
+    print(_tempppp.to_markdown())
+    print(_tempppp.iat[188-27, 0])
     new_df = new_df.str.split('\n', expand = True).fillna('')
     for colname, coldata in new_df.items():
         temp = coldata.str.split(',', expand = True).drop(columns=[1])
@@ -126,6 +156,8 @@ def pretty_print(df, _rooms, _days, _num_col, overlaps):
 
     if not overlaps: # this will fail if there are overlaps
         # start_times = numpy.pad(start_times, (1, 0), constant_values='')
+        print(start_times)
+        print(display_array)
         display_array = numpy.hstack((start_times, display_array))
         header_array = numpy.pad(header_array, ((0, 0), (1, 0)), constant_values='')
     return numpy.vstack((header_array, display_array))
@@ -155,6 +187,7 @@ if __name__ == '__main__':
     drop_unknown_names = False
 
     df = parse_section_tally(section_tally_target)
+    print(df.to_markdown())
     df = map_course_names(df, course_dict) # exact names only for now
     df = instructor_last_names(df)
     
