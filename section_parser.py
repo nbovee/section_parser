@@ -25,7 +25,6 @@ def parse_section_tally(target):
     prof_lname_re_val = r'\g<a>\g<c1>\g<b>\g<c2>\g<c>'
     room_col = df.columns[-1] # former col I
 
-    # filter out rows with empty room_col
     # split timeblock data
     df1 = df[room_col].str.split('\n', expand=True)\
         .stack()\
@@ -35,7 +34,6 @@ def parse_section_tally(target):
     df1_mult = df1.loc[df1['days'].str.len() > 1]
     df1_single = df1.loc[df1['days'].str.len() <= 1]
     df_d = df1_mult["days"].str.extractall(r'(\S)').reset_index()
-    # .reset_index(names=["orig", "l1", "l2", "l3"]).drop(axis = 1, columns = ["l1", "l2", "l3"])
     df1_mult = df1_mult.merge(df_d, left_index=True, right_on='level_0', how = 'inner')\
         .drop(axis = 1, columns = ["days", "level_0","level_1", "match_x", "match_y"])\
         .rename(columns={0: "Day"})
@@ -120,8 +118,6 @@ def pretty_print(df, _rooms, _days, _num_col):
                 display_array = _pad_end(display_array, pad_to)
                 _array = _pad_end(_array, pad_to)
                 display_array = numpy.hstack((display_array, _array))
-    # start_times = numpy.pad(start_times, (1, 0), constant_values='')
-    save_to_excel(pandas.DataFrame(display_array), 'test_output.xlsx')
     display_array = numpy.hstack((start_times, display_array))
     header_array = numpy.pad(header_array, ((0, 0), (1, 0)), constant_values='')
     return numpy.vstack((header_array, display_array))
