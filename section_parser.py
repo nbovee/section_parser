@@ -121,7 +121,6 @@ def pretty_print(df, _rooms, _days, _num_col):
                 _array = _pad_end(_array, pad_to)
                 display_array = numpy.hstack((display_array, _array))
     # start_times = numpy.pad(start_times, (1, 0), constant_values='')
-    print(start_times)
     save_to_excel(pandas.DataFrame(display_array), 'test_output.xlsx')
     display_array = numpy.hstack((start_times, display_array))
     header_array = numpy.pad(header_array, ((0, 0), (1, 0)), constant_values='')
