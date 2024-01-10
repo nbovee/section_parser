@@ -1,0 +1,14 @@
+{
+    "rooms" : [
+        [ "ENGR or ROWAN",
+        "room number"
+        ]
+    ],
+    "courses" : {
+        "exact name from section tally": "abbreviated name"
+    },
+    "faculty" : [
+        "STAFF",
+        "Lastname"
+    ]
+}
