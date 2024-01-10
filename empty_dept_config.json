@@ -8,7 +8,7 @@
         "exact name from section tally": "abbreviated name"
     },
     "faculty" : [
-        "STAFF",
-        "Lastname"
+        "Lastname",
+        "Lastname2"
     ]
 }
