@@ -1,156 +1,132 @@
 #!/usr/bin/python
 
 import pandas
-import numpy
-import json
 import re
-import xlrd # flagged here just so pipreqs sees it
 
-# target must be resaved as a real .xls file, not the half xml Section Tally produces
-# actual format is .xml but the parser find a bug somewhere
-display_start_time = ['0800', '0930', '1100', '1230', '1400', '1530', '1700', '1830', '2000']
-display_end_time = ['0915', '1045', '1215', '1345', '1515', '1645', '1815', '1945', '2115']
+display_start_time = [
+    "0800",
+    "0930",
+    "1100",
+    "1230",
+    "1400",
+    "1530",
+    "1700",
+    "1830",
+    "2000",
+]
+display_end_time = [
+    "0915",
+    "1045",
+    "1215",
+    "1345",
+    "1515",
+    "1645",
+    "1815",
+    "1945",
+    "2115",
+]
+
 
 def parse_section_tally(target):
     try:
-        df = pandas.read_excel(target, usecols='A,C:D,G:I', engine='xlrd')
-        # df = pandas.read_xml(target) # doesn't play nice
+        df = pandas.read_csv(target, usecols=["Title", "Instructor(s)", "Meeting Time"])
+        df = df.rename(columns={"Instructor(s)": "Prof"})
     except Exception as e:
-        print("Tip: Section Tally files must be resaved as true .xls first.")
+        print("Tip: Section Tally CSV file could not be read.")
         print(e)
         exit(1)
-    
-    room_col_re = r'^(?P<days>\S+)\s+(?P<Beg>\S+)\s+(?P<End>\S+)\s+(?P<Bldg>\S*)\s+(?P<Room>\S*)\s+(?P<Type>\S+)' 
-    prof_lname_re = r'((?P<a>[^,]*)(?P<c1>,\s).*)?\s?((?P<b>[^,]*)(?P<c2>,\s).*)?\s?((?P<c>[^,]*),?.*)?'
-    prof_lname_re_val = r'\g<a>\g<c1>\g<b>\g<c2>\g<c>'
-    room_col = df.columns[-1] # former col I
 
-    # split timeblock data
-    df1 = df[room_col].str.split('\n', expand=True)\
-        .stack()\
-        .str.extractall(room_col_re)\
-        .reset_index()\
-        .rename(columns={"level_0": "index"})
-    df1_mult = df1.loc[df1['days'].str.len() > 1]
-    df1_single = df1.loc[df1['days'].str.len() <= 1]
-    df_d = df1_mult["days"].str.extractall(r'(\S)').reset_index()
-    df1_mult = df1_mult.merge(df_d, left_index=True, right_on='level_0', how = 'inner')\
-        .drop(axis = 1, columns = ["days", "level_0","level_1", "match_x", "match_y"])\
-        .rename(columns={0: "Day"})
-    df1_single = df1_single.rename(columns={"days": "Day"})\
-        .drop(axis=1, columns=["level_1", "match"])
-    df1 = pandas.concat([df1_mult, df1_single])
-    df = df.drop(axis = 1, columns = "Day  Beg   End   Bldg Room  (Type)")\
-        .merge(df1, left_index=True, right_on="index", how = 'inner')
-    # filter to only Rowan Hall or Eng. Hall. This has the side effect of dropping Online courses or courses with unmarked rooms
-    df = df[df['Bldg'].isin(['ROWAN', 'ENGR'])]\
-        .drop(axis = 1, columns= 'index')\
+    room_col_re = r"(?P<days>[MTWRF]+)\s+(?P<Beg>\d{1,2}:\d{2}\s(?:AM|PM))\s*-\s*(?P<End>\d{1,2}:\d{2}\s(?:AM|PM))\s+(?P<Bldg>.*?)\s+(?P<Room>\d+)\s+\((?P<Type>\w+)\)"
+    room_col = "Meeting Time"
+
+    # split timeblock data - extractall handles multiple matches per row
+    df1 = (
+        df[room_col]
+        .str.extractall(room_col_re)
+        .reset_index()
+        .rename(columns={"level_0": "index", "level_1": "match_num"})
+    )
+
+    # Expand multi-day entries (e.g., "TR" becomes "T" and "R" as separate rows)
+    expanded_rows = []
+    for _, row in df1.iterrows():
+        days_str = row["days"]
+        if len(days_str) > 1:
+            # Multi-day entry - create one row per day
+            for day in days_str:
+                new_row = row.copy()
+                new_row["Day"] = day
+                expanded_rows.append(new_row)
+        else:
+            # Single day entry
+            new_row = row.copy()
+            new_row["Day"] = days_str
+            expanded_rows.append(new_row)
+
+    df1_parsed = pandas.DataFrame(expanded_rows)
+    # Keep only the columns we need from the regex extraction
+    cols_to_keep = ["index", "Beg", "End", "Bldg", "Room", "Type", "Day"]
+    df1_parsed = df1_parsed[cols_to_keep]
+    df1_parsed = df1_parsed.reset_index(drop=True)
+
+    df = (
+        df.drop(axis=1, columns=room_col)
+        .merge(df1_parsed, left_index=True, right_on="index", how="inner")
+        .drop(axis=1, columns="index")
         .reset_index(drop=True)
-    df['Prof'] = df['Prof'].replace(regex=True,
-                                    to_replace = prof_lname_re,
-                                    value = prof_lname_re_val)\
-        .replace(regex=True,
-                 to_replace=r',\s?$',
-                 value='')
+    )
+    df["Prof"] = df["Prof"].apply(lambda x: split_and_clean_faculty(x))
     return df
 
-def save_to_excel(dataframe, filename):
-    with pandas.ExcelWriter(filename) as writer:
-        dataframe.to_excel(writer, sheet_name='parsed', index=False, header = False)
 
-def map_course_names(df, _dict):
-    df['Title'] = df['Title'].str.strip() # catches some bad formatting from ST
-    df['Title'] = df['Title'].replace(_dict)
-    return df
+def split_and_clean_faculty(prof_str):
+    """Split concatenated faculty names and clean formatting
 
-def drop_names_not_in(_df, instr_list):
-    series_lists = _df['Prof'].str.split(',')
-    new_list = []
-    for _list in series_lists:
-        new_list.append("".join(filter(lambda i: i in instr_list, list(map(str.strip,_list)))))
-    _df['Prof'] = new_list
-    return _df
-
-def room_occupancy(df, prof =  '.', room = ('.','.'), day = '.'):
-    new_df = df[df['Prof'].str.contains(prof) \
-            & df['Day'].str.contains(day) \
-            & df['Bldg'].str.contains(room[0]) \
-            & df['Room'].str.contains(room[1])]
-    return new_df.sort_values(by=['Room', 'Beg'])
-
-def room_occupancy_on_day(_df, _room, _day):
-    new_df = room_occupancy(_df, room=_room, day=_day)
-    new_df = new_df.loc[:,['Beg','Title','Prof']]
-    new_df = new_df.join(pandas.DataFrame(index=display_start_time),on='Beg', how='right').sort_values(by='Beg').reindex()
-    for t in display_start_time:
-        if len(new_df.loc[new_df['Beg'] == t]) > 1: # squash overlapped sections
-            temp = new_df.index[new_df['Beg'] == t].tolist()
-            for i in temp[1:]:
-                new_df.loc[temp[0],'Title'] += ' & ' + new_df.loc[i, 'Title']
-                new_df.drop(index = i, inplace= True)
-    new_df = new_df.fillna("").to_numpy()
-    return [_day, _room], new_df
-
-def pretty_print(df, _rooms, _days, _num_col):
-    filter_df = df[['Title', 'Prof', 'Beg', "End", "Day"]]
-    filter_df['BldgRoom'] = df['Bldg'] + '-' + df['Room']
-    buildings_rooms = set([b + '-' + r for b,r in _rooms])
-    filter_df = filter_df[filter_df.BldgRoom.isin(buildings_rooms)]
-    def _pad_end(_array, final_axis):
-        return numpy.pad(_array, ((0, final_axis - _array.shape[0]), (0,0)), constant_values='')
-    
-    num_col = _num_col
-    header_array = numpy.full((2, len(_days)*len(_rooms)*(num_col)), "", dtype=numpy.dtype('<U100'))
-    display_array = None
-
-    for i, day in enumerate(display_days):
-        header_array[0,i*len(_rooms)*(num_col)] = day
-        for j, room in enumerate(_rooms):
-            header_array[1,i*len(_rooms)*(num_col)+j*(num_col)] = ''.join(room)
-            key, _array = room_occupancy_on_day(df, room, day)
-            start_times = _array[:,:1]
-            _array = _array[:,1:]
-            if display_array is None:
-                display_array = _array
-            else:
-                # pad the smaller array so hstack can work
-                pad_to = max(display_array.shape[0], _array.shape[0])
-                display_array = _pad_end(display_array, pad_to)
-                _array = _pad_end(_array, pad_to)
-                display_array = numpy.hstack((display_array, _array))
-    display_array = numpy.hstack((start_times, display_array))
-    header_array = numpy.pad(header_array, ((0, 0), (1, 0)), constant_values='')
-    return numpy.vstack((header_array, display_array))
-
-if __name__ == '__main__':
-    """ IMPORTANT
-    whatever is downloaded from Section Tally MUST be resaved as a true .xls
-    Section Tally outputs a broken xml file as far as I can tell
+    For multiple faculty: splits on concatenated names like "Viggiano, Paul FAimino, Jacqueline Ann"
+    into "Viggiano, Paul F | Aimino, Jacqueline Ann"
     """
-    # time fields are heavily duplicated since some courses over scheduled at the same time same room
-    # only practical way to clean that up without a lot of programming is manual toggle
-    config_path = 'exeed_config.json'
-    with open(config_path, 'r') as f:
-        config_dict = json.load(f)
+    if not prof_str or pandas.isna(prof_str):
+        return prof_str
 
-    room_list = config_dict['rooms']
-    course_dict = config_dict['courses']
-    faculty_list = config_dict['faculty']
-    section_tally_target = 'section_tally_f24_resave.xls' 
-    intermediate_output = 'section_tally_f24_parsed.xlsx'
-    final_pretty_output = config_path.split('_')[0] + '_room_schedule_output.xlsx'
-    display_days = ['M', 'T', 'W', 'R', 'F']
-    num_col = 2 # adjust if more than instructor and class are needed
+    prof_str = str(prof_str).strip()
 
-    save_intermediate_df = True
-    drop_unknown_names = False
+    # Count commas to determine how many faculty
+    comma_count = prof_str.count(",")
+
+    if comma_count <= 1:
+        # Single faculty - return full name
+        return prof_str
+
+    # Multiple faculty members - split concatenated names
+    # Handle various concatenation patterns:
+    # 1. "Viggiano, Paul FAimino, Jacqueline Ann" - initial + lastname
+    # 2. "Williams, Allison S.Oestreich, Bruce D" - period + lastname (including compound like LeMasney)
+    # 3. "Singh, RajveerIslam, Md Sadman" - lowercase + lastname (only when no period)
+
+    # Pattern 1: Capital letter (initial) followed by Capital+lowercase+comma
+    result = re.sub(r"([A-Z])([A-Z][a-z]+,)", r"\1 | \2", prof_str)
+
+    # Pattern 2: Period followed by LastName (handles compound surnames like LeMasney)
+    result = re.sub(r"(\.)([A-Z][A-Za-z]*,)", r"\1 | \2", result)
+
+    # Pattern 3: Lowercase followed by Capital+lowercase+comma
+    # Only apply if there's no period (indicates no initial/formal boundary)
+    if "." not in prof_str:
+        result = re.sub(r"([a-z])([A-Z][a-z]+,)", r"\1 | \2", result)
+
+    # Clean up any trailing commas and extra spaces
+    result = re.sub(r",\s*$", "", result)
+
+    return result
+
+
+def save_to_csv(dataframe, filename):
+    dataframe.to_csv(filename, index=False)
+
+
+if __name__ == "__main__":
+    section_tally_target = "section_tally.csv"
+    intermediate_output_csv = "section_tally_parsed.csv"
 
     df = parse_section_tally(section_tally_target)
-    df = map_course_names(df, course_dict) # exact names only for now
-    if save_intermediate_df:
-        save_to_excel(df, intermediate_output)
-    if drop_unknown_names:
-        df = drop_names_not_in(df, faculty_list)
-    pretty_array = pretty_print(df, room_list, display_days, num_col)
-    # could leverage python xlsx writers to pretty up the code in script instead of this
-    save_to_excel(pandas.DataFrame(pretty_array), final_pretty_output)
+    save_to_csv(df, intermediate_output_csv)
